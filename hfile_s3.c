@@ -738,6 +738,51 @@ static s3_auth_data * setup_auth_data(const char *s3url, const char *mode,
         dns_compliant = is_dns_compliant(bucket, path, is_https);
     }
 
+    // Check if the S3 URI as bucket/path is provided, i.e.:
+    // access point
+    //      bucket/path==arn:aws:s3:{region}:{accountnumber}:accesspoint/bucket/object/path
+    // no access point:
+    //      bucket/path==arn:aws:s3:::bucket/path
+    kstring_t account_number = KS_INITIALIZE;
+    const int length_of_arn_uri_identifier = 11;
+    int is_arn = strncmp(bucket, "arn:aws:s3:", length_of_arn_uri_identifier) == 0;
+
+    int is_access_point = 0;
+    if (is_arn){
+        bucket += length_of_arn_uri_identifier;
+        // Is a region provided?
+        if (bucket[1] != ":") {
+            while (*bucket != ':') kputc(*bucket++, &ad->region);
+        }
+        bucket++;
+        // Is a account_number provided?
+        if (bucket[1] != ":") {
+            while (*bucket != ':') kputc(*bucket++, &account_number);
+        }
+        bucket++;
+
+        if (bucket[1] != ":" && strncmp(bucket, "accesspoint/", 12)==0) {
+            is_access_point = 1;
+            bucket += 12;
+        }
+        path = bucket + strcspn(bucket, "/?#");
+    }
+
+    bucket_len = path - bucket;
+
+    // url for access points if of the form
+    // https://{bucketname}-{accountnumber}.s3-accesspoint.{region}.amazonaws.com/{path}
+    if (ad->host.l == 0 && is_access_point){
+        // constant "/object" needs to be removed from
+        // bucket/object/path in
+        // bucket/path==arn:aws:s3:{region}:{accountnumber}:accesspoint/bucket/object/path
+        const int length_object = 7;
+        path += length_object;
+        ksprintf(&ad->host, "s3-accesspoint.%s.amazonaws.com", ad->region.s);
+        dns_compliant = 1;
+    }
+
+
     if (ad->host.l == 0)
         kputs("s3.amazonaws.com", &ad->host);
 
@@ -759,13 +804,18 @@ static s3_auth_data * setup_auth_data(const char *s3url, const char *mode,
         }
     }
 
-    bucket_len = path - bucket;
 
     // Use virtual hosted-style access if possible, otherwise path-style.
     if (dns_compliant) {
         size_t url_host_pos = url->l;
         // Append "bucket.host" to url
         kputsn_(bucket, bucket_len, url);
+        // url for access points if of the form
+        // https://{bucketname}-{accountnumber}.s3-accesspoint.{region}.amazonaws.com/{path}
+        if (is_access_point){
+            kputc('-', url);
+            kputsn(account_number.s, account_number.l, url);
+        }
         kputc('.', url);
         kputsn(ad->host.s, ad->host.l, url);
         url_path_pos = url->l;
@@ -811,6 +861,7 @@ static s3_auth_data * setup_auth_data(const char *s3url, const char *mode,
     }
 
     free(escaped);
+    free(account_number.s);
 
     return ad;
 
