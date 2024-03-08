@@ -773,11 +773,6 @@ static s3_auth_data * setup_auth_data(const char *s3url, const char *mode,
     // url for access points if of the form
     // https://{bucketname}-{accountnumber}.s3-accesspoint.{region}.amazonaws.com/{path}
     if (ad->host.l == 0 && is_access_point){
-        // constant "/object" needs to be removed from
-        // bucket/object/path in
-        // bucket/path==arn:aws:s3:{region}:{accountnumber}:accesspoint/bucket/object/path
-        const int length_object = 7;
-        path += length_object;
         ksprintf(&ad->host, "s3-accesspoint.%s.amazonaws.com", ad->region.s);
         dns_compliant = 1;
     }
